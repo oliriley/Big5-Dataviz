@@ -43,34 +43,53 @@ while loop <= length(data(:,1))
 end
 
 % Some anomalous answers remain, but it's good enough for a first pass. 
-%
-% One optional modification: subtracting off the mean of each column. (I
-% believe, but have not yet checked, that this will make some of the later
+
+% One optional modification: subtracting off the mean of each column and
+% dividing the remaining columns by their variance.
+% I believe, but have not yet checked, that this will make some of the later
 % analysis easier, but haven't yet checked.)
 
-% data = data - repmat([mean(data(:,1)),mean(data(:,2)),mean(data(:,3)),mean(data(:,4)),mean(data(:,5))],size(data,1),1);
+% Subtract the means:
+data = data - repmat([mean(data(:,1)),mean(data(:,2)),mean(data(:,3)),mean(data(:,4)),mean(data(:,5))],size(data,1),1);
+
+% Divide by variance:
+for loop = 1:size(data,2)
+    data(:,loop) = data(:,loop)./std(data(:,loop));
+end
+
+figure
+subplot(2,3,1)
+plot(data(:,1))
+subplot(2,3,2)
+plot(data(:,2))
+subplot(2,3,3)
+plot(data(:,3))
+subplot(2,3,4)
+plot(data(:,4))
+subplot(2,3,5)
+plot(data(:,5))
 
 %%
 
 figure
 subplot(2,3,1)
-hist(data(:,1),-20:20)
+hist(data(:,1),[floor(min(data(:,1))):ceil(max(data(:,1)))])
 title('Openness')
 
 subplot(2,3,2)
-hist(data(:,2),-20:20)
+hist(data(:,2),[floor(min(data(:,1))):ceil(max(data(:,2)))])
 title('Conscientiousness')
 
 subplot(2,3,3)
-hist(data(:,3),-20:20)
+hist(data(:,3),[floor(min(data(:,1))):ceil(max(data(:,1)))])
 title('Extraversion')
 
 subplot(2,3,4)
-hist(data(:,4),-20:20)
+hist(data(:,4),[floor(min(data(:,1))):ceil(max(data(:,1)))])
 title('Agreeableness')
 
 subplot(2,3,5)
-hist(data(:,5),-20:20)
+hist(data(:,5),[floor(min(data(:,1))):ceil(max(data(:,1)))])
 title('Neuroticism')
 
 % Visualizing the histograms of each trait column individually produces
@@ -130,9 +149,12 @@ ylabel('N')
 
 % Simply plotting each trait against the others is not very illustrative,
 % because there is no many indication of how many datapoints lie at each
-% intersection. Instead, construct a 3D histogram:
+% intersection.
+
+%%
+% Instead, construct 3D histograms:
  
-RANGE = [10:50];
+RANGE = [floor(min(min(data))):ceil(max(max(data)))];
 figure
 hist3([data(:,1),data(:,2)],{RANGE,RANGE})
 title('Openness vs Concientiousness')
@@ -242,22 +264,71 @@ end
 % Put the distances between clusters and the centers of the groups they're
 % assigned to in a more easily parsed form
 clusterSumMeans = [];
-for loop = 1:length(clusterList)
+for loop = 1:length(clusterSum)
     clusterSumMeans(loop) = mean(clusterSum{loop});
 end
 clusterSumTotals = clusterSumMeans.*[1:length(clusterSumMeans)];
-clusterSumSSE = clusterSumTotals.^2;
+clusterSumSSE = [];
+for loop = 1:75%length(clusterDist)
+    clusterSumSSE(loop) = sum(min(clusterDist{loop},[],2).^2);
+end
 
 %%
-close all
-plot(clusterSumMeans,'*-'), hold on
-plot(clusterSumTotals,'*-r')
-figure
-plot(clusterSumSSE,'x-k')
+% Find the elbow of the curve by maximizing distance to the linear
+% interpolation between first and last points. Taken from
+% https://stackoverflow.com/questions/2018178/finding-the-best-trade-off-point-on-a-curve
+
+%# get coordinates of all the points
+nPoints = length(clusterSumSSE);
+allCoord = [1:nPoints;clusterSumSSE]';              %'# SO formatting
+
+%# pull out first point
+firstPoint = allCoord(1,:);
+
+%# get vector between first and last point - this is the line
+lineVec = allCoord(end,:) - firstPoint;
+
+%# normalize the line vector
+lineVecN = lineVec / sqrt(sum(lineVec.^2));
+
+%# find the distance from each point to the line:
+%# vector between all points and first point
+vecFromFirst = bsxfun(@minus, allCoord, firstPoint);
+
+%# To calculate the distance to the line, we split vecFromFirst into two 
+%# components, one that is parallel to the line and one that is perpendicular 
+%# Then, we take the norm of the part that is perpendicular to the line and 
+%# get the distance.
+% 
+%# We find the vector parallel to the line by projecting vecFromFirst onto 
+%# the line. The perpendicular vector is vecFromFirst - vecFromFirstParallel
+%# We project vecFromFirst by taking the scalar product of the vector with 
+%# the unit vector that points in the direction of the line (this gives us 
+%# the length of the projection of vecFromFirst onto the line). If we 
+%# multiply the scalar product by the unit vector, we have vecFromFirstParallel
+scalarProduct = dot(vecFromFirst, repmat(lineVecN,nPoints,1), 2);
+vecFromFirstParallel = scalarProduct * lineVecN;
+vecToLine = vecFromFirst - vecFromFirstParallel;
+
+%# distance to line is the norm of vecToLine
+distToLine = sqrt(sum(vecToLine.^2,2));
+
+%# plot the distance to the line
+figure('Name','distance from curve to line'), plot(distToLine)
+
+%# now all you need is to find the maximum
+[maxDist,idxOfBestPoint] = max(distToLine);
+
+%# plot
+figure, plot(clusterSumSSE)
+hold on
+plot(allCoord(idxOfBestPoint,1), allCoord(idxOfBestPoint,2), 'or')
+
+% This gives results between 5 (for 25 clusters) to 10 (for 75+ clusters).
+% Need extra ways to validate.
 
 %%
-% Visualize the various centroids
-
+% @@TODO: perform the same evaluation as above, using the second derivative
 
 %%
 % Plot some of the groups and see how they overlap. The axes with highest
@@ -265,7 +336,7 @@ plot(clusterSumSSE,'x-k')
 % let's look at those.
 close all
 
-for LISTNUM = 3:5
+for LISTNUM = 3:9
     figure(LISTNUM)
     for loop = 1:10:length(clusterList{LISTNUM})
         switch clusterList{LISTNUM}(loop)
@@ -291,6 +362,7 @@ for LISTNUM = 3:5
                 disp('Wrong input list!')
                 break
         end
+        % drawnow
     end
     title(strcat('Big 5 Clustering:`',strcat(num2str(LISTNUM),' Groups')))
     xlabel('Openness')
@@ -301,16 +373,17 @@ end
 %%
 % Evaluating number of clusters with Bayesian Information Criterion
 % https://stackoverflow.com/questions/15839774/how-to-calculate-bic-for-k-means-clustering-in-r
-% claims that "BIC = D + log(n)*m*k" where 
+% claims that "BIC = D + ln(n)*m*k" where 
 % m = number of columns
 % n = number of datapoints
 % k = number of centers
 % D = total within-cluster sum of squares
 for loop = 1:length(clusterDist)
-    BIC(loop)= sum(min(clusterDist{loop}).^2) + log10(length(data))*size(data,2)*loop;
+    BIC1(loop) = sum(min(clusterDist{loop},[],2).^2);
+    BIC2(loop) = log(length(data))*size(data,2)*loop;
 end
-plot(BIC)
-
-% Currently this is monotone increasing for all clusters 1-90, so either
-% there are no real clusters (BIC minimized at k=1) or I've done it wrong.
-% Probably the latter.
+figure
+plot(BIC1), hold on
+plot(BIC2,'k')
+plot(BIC1+BIC2,'r'), hold off
+% @@TODO implement this correctly, because it appears to be trash currently
